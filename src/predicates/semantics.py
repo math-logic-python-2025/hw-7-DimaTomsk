@@ -7,7 +7,7 @@
 """Semantic analysis of predicate-logic expressions."""
 
 from typing import FrozenSet, Generic, TypeVar
-
+from itertools import product
 from src.logic_utils import frozendict
 
 from src.predicates.syntax import *
@@ -153,6 +153,13 @@ class Model(Generic[T]):
         for function, arity in term.functions():
             assert function in self.function_interpretations and self.function_arities[function] == arity
         # Task 7.7
+        if is_variable(term.root):
+            return assignment[term.root]
+        if is_constant(term.root):
+            return self.constant_interpretations[term.root]
+        else:
+            args = tuple(self.evaluate_term(argument, assignment) for argument in term.arguments)
+            return self.function_interpretations[term.root][args]
 
     def evaluate_formula(self, formula: Formula, assignment: Mapping[str, T] = frozendict()) -> bool:
         """Calculates the truth value of the given formula in the current model
@@ -179,6 +186,33 @@ class Model(Generic[T]):
             assert relation in self.relation_interpretations and self.relation_arities[relation] in {-1, arity}
         # Task 7.8
 
+        if is_unary(formula.root):
+            return not self.evaluate_formula(formula.first, assignment)
+        elif is_binary(formula.root):
+            first_val = self.evaluate_formula(formula.first, assignment)
+            second_val = self.evaluate_formula(formula.second, assignment)
+            if formula.root == "&":
+                return first_val and second_val
+            elif formula.root == "|":
+                return first_val or second_val
+            return not first_val or second_val
+        elif is_equality(formula.root):
+            left_val = self.evaluate_term(formula.arguments[0], assignment)
+            right_val = self.evaluate_term(formula.arguments[1], assignment)
+            return left_val == right_val
+        elif is_relation(formula.root):
+            args = [self.evaluate_term(x, assignment) for x in formula.arguments]
+            return tuple(args) in self.relation_interpretations[formula.root]
+
+        results = []
+        for item in self.universe:
+            new_assignment = dict(assignment)
+            new_assignment[formula.variable] = item
+            results.append(self.evaluate_formula(formula.statement, new_assignment))
+        if formula.root == "A":
+            return all(results)
+        return any(results)
+
     def is_model_of(self, formulas: AbstractSet[Formula]) -> bool:
         """Checks if the current model is a model of the given formulas.
 
@@ -198,4 +232,16 @@ class Model(Generic[T]):
                 assert function in self.function_interpretations and self.function_arities[function] == arity
             for relation, arity in formula.relations():
                 assert relation in self.relation_interpretations and self.relation_arities[relation] in {-1, arity}
+
         # Task 7.9
+
+        def check_single_formula(formula: Formula):
+            free_vars = formula.free_variables()
+            if len(free_vars) == 0:
+                return self.evaluate_formula(formula)
+            for values in product(self.universe, repeat=len(free_vars)):
+                if not self.evaluate_formula(formula, dict(zip(free_vars, values))):
+                    return False
+            return True
+
+        return all(map(check_single_formula, formulas))
